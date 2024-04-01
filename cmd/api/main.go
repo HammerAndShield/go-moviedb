@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
+	"expvar"
 	"flag"
+	"fmt"
 	"greenlight.wormwoodscrubs.net/internal/data"
 	"greenlight.wormwoodscrubs.net/internal/mailer"
+	"greenlight.wormwoodscrubs.net/internal/vcs"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -15,7 +19,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const version = "1.0.0"
+var (
+	version = vcs.Version()
+)
 
 type config struct {
 	port int
@@ -78,7 +84,14 @@ func main() {
 		return nil
 	})
 
+	displayVersion := flag.Bool("version", false, "Display version and exit")
+
 	flag.Parse()
+
+	if *displayVersion {
+		fmt.Printf("Version:\t%s\n", version)
+		os.Exit(0)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -91,6 +104,20 @@ func main() {
 	defer db.Close()
 
 	logger.Info("database connection pool established")
+
+	expvar.NewString("version").Set(version)
+
+	expvar.Publish("goroutines", expvar.Func(func() any {
+		return runtime.NumGoroutine()
+	}))
+
+	expvar.Publish("database", expvar.Func(func() any {
+		return db.Stats()
+	}))
+
+	expvar.Publish("timestamp", expvar.Func(func() any {
+		return time.Now().Unix()
+	}))
 
 	app := &application{
 		config: cfg,

@@ -2,12 +2,14 @@ package main
 
 import (
 	"errors"
+	"expvar"
 	"fmt"
+	"github.com/tomasen/realip"
 	"golang.org/x/time/rate"
 	"greenlight.wormwoodscrubs.net/internal/data"
 	"greenlight.wormwoodscrubs.net/internal/validator"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,23 +57,23 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if app.config.limiter.enabled {
-			ip, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				app.serverErrorResponse(w, r, err)
-				return
-			}
+			ip := realip.FromRequest(r)
+
 			mu.Lock()
 			if _, found := clients[ip]; !found {
 				clients[ip] = &client{
 					limiter: rate.NewLimiter(rate.Limit(app.config.limiter.rps), app.config.limiter.burst),
 				}
 			}
+
 			clients[ip].lastSeen = time.Now()
+
 			if !clients[ip].limiter.Allow() {
 				mu.Unlock()
 				app.rateLimitExceededResponse(w, r)
 				return
 			}
+
 			mu.Unlock()
 		}
 		next.ServeHTTP(w, r)
@@ -197,5 +199,67 @@ func (app *application) enableCORS(next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(w, r)
+	})
+}
+
+// section metrics
+type metricsResponseWriter struct {
+	wrapped       http.ResponseWriter
+	statusCode    int
+	headerWritten bool
+}
+
+func newMetricsResponseWriter(w http.ResponseWriter) *metricsResponseWriter {
+	return &metricsResponseWriter{
+		wrapped:    w,
+		statusCode: http.StatusOK,
+	}
+}
+
+func (mw *metricsResponseWriter) Header() http.Header {
+	return mw.wrapped.Header()
+}
+
+func (mw *metricsResponseWriter) WriteHeader(statusCode int) {
+	mw.wrapped.WriteHeader(statusCode)
+
+	if !mw.headerWritten {
+		mw.statusCode = statusCode
+		mw.headerWritten = true
+	}
+}
+
+func (mw *metricsResponseWriter) Write(b []byte) (int, error) {
+	mw.headerWritten = true
+	return mw.wrapped.Write(b)
+}
+
+func (mw *metricsResponseWriter) Unwrap() http.ResponseWriter {
+	return mw.wrapped
+}
+
+func (app *application) metrics(next http.Handler) http.Handler {
+	var (
+		totalRequestsReceived           = expvar.NewInt("total_requests_received")
+		totalResponsesSent              = expvar.NewInt("total responses sent")
+		totalProcessingTimeMicroseconds = expvar.NewInt("total_processing_time_μs")
+		totalResponseSentByStatus       = expvar.NewMap("total_responses_sent_by_status")
+	)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		totalRequestsReceived.Add(1)
+
+		mw := newMetricsResponseWriter(w)
+
+		next.ServeHTTP(mw, r)
+
+		totalResponsesSent.Add(1)
+
+		totalResponseSentByStatus.Add(strconv.Itoa(mw.statusCode), 1)
+
+		duration := time.Since(start).Microseconds()
+		totalProcessingTimeMicroseconds.Add(duration)
 	})
 }
