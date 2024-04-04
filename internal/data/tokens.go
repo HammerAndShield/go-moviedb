@@ -13,6 +13,7 @@ import (
 const (
 	ScopeActivation     = "activation"
 	ScopeAuthentication = "authentication"
+	ScopePasswordReset
 )
 
 type Token struct {
