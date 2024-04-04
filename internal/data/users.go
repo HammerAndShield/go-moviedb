@@ -218,6 +218,8 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 	return &user, nil
 }
 
+// For use with JWT
+
 func (m UserModel) Get(id int64) (*User, error) {
 	query := `SELECT id, created_at, name, email, password_hash, activated, version
               FROM users
