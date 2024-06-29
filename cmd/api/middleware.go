@@ -162,24 +162,24 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		//
 		//r = app.contextSetUser(r, user)
 
-		next.ServeHTTP(w, r)
+		//next.ServeHTTP(w, r)
 	})
 }
 
-func (app *application) requiredAuthenticatedUser(next http.HandlerFunc) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := app.contextGetUser(r)
+func (app *application) requireAuthenticatedUser(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+        user := app.contextGetUser(r)
 
-		if user.IsAnonymous() {
-			app.authenticationRequiredResponse(w, r)
-			return
-		}
+        if user.IsAnonymous() {
+            app.authenticationRequiredResponse(w, r)
+            return
+        }
 
-		next.ServeHTTP(w, r)
-	})
+        next.ServeHTTP(w, r)
+    }
 }
 
-func (app *application) requiredActivatedUser(next http.HandlerFunc) http.HandlerFunc {
+func (app *application) requireActivatedUser(next http.HandlerFunc) http.HandlerFunc {
 	fn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := app.contextGetUser(r)
 
@@ -191,7 +191,7 @@ func (app *application) requiredActivatedUser(next http.HandlerFunc) http.Handle
 		next.ServeHTTP(w, r)
 	})
 
-	return app.requiredAuthenticatedUser(fn)
+	return app.requireAuthenticatedUser(fn)
 }
 
 func (app *application) requirePermission(code string, next http.HandlerFunc) http.HandlerFunc {
@@ -212,7 +212,7 @@ func (app *application) requirePermission(code string, next http.HandlerFunc) ht
 		next.ServeHTTP(w, r)
 	}
 
-	return app.requiredActivatedUser(fn)
+	return app.requireActivatedUser(fn)
 }
 
 func (app *application) enableCORS(next http.Handler) http.Handler {
